@@ -9,11 +9,39 @@ This file contains code to process IAM dataset (http://www.fki.inf.unibe.ch/data
 import pandas as pd
 import numpy as np
 import os
-from typing import Tuple
+from typing import Tuple, Mapping
 from tqdm import tqdm
 import re
 from imageio import imread, imsave
 from im_tools.transform.crop import crop_image
+
+
+class Info_IAM:
+    train_samples = 6161
+    test_samples = 1861
+    validation1_samples = 900
+    validation2_samples = 940
+
+    filename_trainset = 'trainset.txt'
+    filename_testset = 'testset.txt'
+    filename_validationset1 = 'validationset1.txt'
+    filename_validationset2 = 'validationset2.txt'
+
+
+class Linefile_IAM:
+    column_names = ["id", "seg_state", "gray_level", "n_components", "x", "y", "w", "h", "transcription"]
+    column_types = {'id': str, 'seg_state': str, 'gray_level': np.uint8, 'n_components': np.int32,
+                    'x': np.int32, 'y': np.int32, 'w': np.int32, 'h': np.int32, 'transcription': str}
+    skiprows = 23
+    n_total_rows = 13353
+
+
+class Wordfile_IAM:
+    column_names = ["id", "seg_state", "gray_level", "x", "y", "w", "h", "gram_tag", "transcription"]
+    column_types = {'id': str, 'seg_state': str, 'gray_level': np.uint8, 'x': np.int32,
+                    'y': np.int32, 'w': np.int32, 'h': np.int32, 'gram_tag': str, 'transcription': str}
+    skiprows = 18
+    n_total_rows = 115320
 
 
 def load_ascii_txt_file(filename: str) -> pd.DataFrame:
@@ -22,23 +50,20 @@ def load_ascii_txt_file(filename: str) -> pd.DataFrame:
     :param filename: filename of txt file to load
     :return: a DataFrame with the content of .txt
     """
-    columns_names = None
-    columns_type = None
     if 'lines' in filename:
-        columns_names = ["id", "seg_state", "gray_level", "n_components", "x", "y", "w", "h", "transcription"]
-        columns_type = {'id': str, 'seg_state': str, 'gray_level': np.uint8, 'n_components': np.int32,
-                        'x': np.int32, 'y': np.int32, 'w': np.int32, 'h': np.int32, 'transcription': str}
+        filetype = Linefile_IAM
+
     elif 'words' in filename:
-        columns_names = ["id", "seg_state", "gray_level", "x", "y", "w", "h",
-                         "gram_tag", "transcription"]
-        columns_type = {'id': str, 'seg_state': str, 'gray_level': np.uint8, 'x': np.int32,
-                        'y': np.int32, 'w': np.int32, 'h': np.int32, 'gram_tag': str, 'transcription': str}
+        filetype = Wordfile_IAM
 
-    data_lines = pd.read_csv(filename, delim_whitespace=True, comment='#',
-                             encoding='utf8', error_bad_lines=False, header=None,
-                             names=columns_names, dtype=columns_type, quoting=3)
+    data = pd.read_csv(filename, delim_whitespace=True, skiprows=filetype.skiprows,
+                       encoding='utf8', error_bad_lines=False, header=None,
+                       names=filetype.column_names, dtype=filetype.column_types, quoting=3)
 
-    return data_lines
+    assert len(data) == filetype.n_total_rows, "Parsing of file didn't get all the rows. " \
+                                               "Parsed {} instead of {}".format(len(data), filetype.n_total_rows)
+
+    return data
 
 
 def generate_segments(filename: str, images_dir: str, export_dir: str,
@@ -96,7 +121,7 @@ def create_experiment_csv(filename: str, image_directory: str, output_filename) 
             transcription = row.transcription.replace('|', ' ')
             # Remove space after ( char)
             transcription = re.sub(r'([?(])+\s', r'\1', transcription)
-            # Remove space befor .,?!) chars
+            # Remove space before .,?!) chars
             transcription = re.sub(r'\s+([?.,;!)])', r'\1', transcription).strip()
         except AttributeError:
             print('Transcription does not exists in {}'.format(index))
@@ -108,3 +133,79 @@ def create_experiment_csv(filename: str, image_directory: str, output_filename) 
     # Create dataframe with filenames and transcriptions
     df = pd.DataFrame({'path': list_filenames, 'transcription': list_transcriptions})
     df.to_csv(output_filename, sep=';', encoding='utf-8', header=False, index=False, escapechar="\\", quoting=3)
+
+
+def _make_lookup_id_set(root_dir_set_list: str) -> Mapping[str, str]:
+    """
+    From the files listing the id for each set (train, test, validation1, validation2), generate a dictionary that will
+    have as keys the id of lines/words and as values the name of set it belongs to ('train', 'test',
+    'validation1', 'validation2')
+    :param root_dir_set_list: path to the folder containing the split files .txt
+    :return: a dictionary with {id: set}
+    """
+
+    _tuples = [(Info_IAM.filename_trainset, 'train'), (Info_IAM.filename_testset, 'test'),
+               (Info_IAM.filename_validationset1, 'val1'), (Info_IAM.filename_validationset2, 'val2')]
+
+    # Get all the id for each set
+    dataframes = list()
+    for filename_set, set_id in _tuples:
+        tmp_df = pd.read_csv(os.path.join(root_dir_set_list, filename_set), encoding='utf8', header=None, names=['id'])
+        tmp_df = tmp_df.assign(set=len(tmp_df) * [set_id])
+
+        dataframes.append(tmp_df)
+
+    # Concatenate all the dataframes
+    df_all = pd.concat(dataframes)
+
+    # Create a dictionary {id : set}
+    dic_set_belonging = dict()
+    for index, row in df_all.iterrows():
+        dic_set_belonging[row.id] = row.set
+
+    return dic_set_belonging
+
+
+def generate_splits_txt(filename: str, rootdir_set_files: str, exportdir_set_files: str) -> None:
+    """
+    This function generates the train / test / validation1 / validation2 txt file
+    with the same pattern as the ascii/{lines, words}.txt file.
+    :param filename: full data txt file (e.g lines.txt)
+    :param rootdir_set_files: path to directory where the set split .txt files are
+    :param exportdir_set_files: directory to save the new generated files
+    :return:
+    """
+    data = load_ascii_txt_file(filename)
+    lookup_id_set = _make_lookup_id_set(rootdir_set_files)
+
+    train_list, test_list, val1_list, val2_list = list(), list(), list(), list()
+    for index, row in tqdm(data.iterrows()):
+        try:
+            if lookup_id_set[row.id] == 'train':
+                train_list.append(row)
+            elif lookup_id_set[row.id] == 'test':
+                test_list.append(row)
+            elif lookup_id_set[row.id] == 'val1':
+                val1_list.append(row)
+            elif lookup_id_set[row.id] == 'val2':
+                val2_list.append(row)
+        except KeyError:
+            print('{} does not exist'.format(row.id))
+
+    # Check that we have the same number of elements being exported
+    assert Info_IAM.train_samples == len(train_list), \
+        "Training : {} != {}".format(Info_IAM.train_samples, len(train_list))
+    assert Info_IAM.test_samples == len(test_list), \
+        "Testing : {} != {}".format(Info_IAM.test_samples, len(test_list))
+    assert Info_IAM.validation1_samples == len(val1_list), \
+        "Validation1 : {} != {}".format(Info_IAM.validation1_samples, len(val1_list))
+    assert Info_IAM.validation2_samples == len(val2_list), \
+        "Validation2 : {} != {}".format(Info_IAM.validation2_samples, len(val2_list))
+
+    # Export dataframes to txt files
+    tuples_export = [(train_list, os.path.join(exportdir_set_files, 'lines_train.txt')),
+                     (test_list, os.path.join(exportdir_set_files, 'lines_test.txt')),
+                     (val1_list, os.path.join(exportdir_set_files, 'lines_validation1.txt')),
+                     (val2_list, os.path.join(exportdir_set_files, 'lines_validation2.txt'))]
+    for set_list, export_filename in tuples_export:
+        pd.DataFrame(set_list).to_csv(export_filename, sep=' ', header=False, index=False, quoting=3)
