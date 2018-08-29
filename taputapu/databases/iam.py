@@ -13,7 +13,7 @@ from typing import Tuple, Mapping
 from tqdm import tqdm
 import re
 from imageio import imread, imsave
-from im_tools.transform.crop import crop_image
+from taputapu.transform.crop import crop_image
 
 
 class Info_IAM:
@@ -26,6 +26,8 @@ class Info_IAM:
     filename_testset = 'testset.txt'
     filename_validationset1 = 'validationset1.txt'
     filename_validationset2 = 'validationset2.txt'
+
+    strikeout_char = '#'
 
 
 class Linefile_IAM:
@@ -44,10 +46,12 @@ class Wordfile_IAM:
     n_total_rows = 115320
 
 
-def load_ascii_txt_file(filename: str) -> pd.DataFrame:
+def load_ascii_txt_file(filename: str, skiprows=True, asserting_n_rows=True) -> pd.DataFrame:
     """
     Load ascii/*.txt files
     :param filename: filename of txt file to load
+    :param skiprows: if True will first rows containing text, if False assumes data start from the first row
+    :param asserting_n_rows: if True will check that the number of lines read correspond to the exact number of samples
     :return: a DataFrame with the content of .txt
     """
     if 'lines' in filename:
@@ -55,13 +59,16 @@ def load_ascii_txt_file(filename: str) -> pd.DataFrame:
 
     elif 'words' in filename:
         filetype = Wordfile_IAM
+    else:
+        raise NotImplementedError
 
-    data = pd.read_csv(filename, delim_whitespace=True, skiprows=filetype.skiprows,
+    data = pd.read_csv(filename, delim_whitespace=True, skiprows=filetype.skiprows if skiprows else None,
                        encoding='utf8', error_bad_lines=False, header=None,
                        names=filetype.column_names, dtype=filetype.column_types, quoting=3)
 
-    assert len(data) == filetype.n_total_rows, "Parsing of file didn't get all the rows. " \
-                                               "Parsed {} instead of {}".format(len(data), filetype.n_total_rows)
+    if asserting_n_rows:
+        assert len(data) == filetype.n_total_rows, "Parsing of file didn't get all the rows. " \
+                                                   "Parsed {} instead of {}".format(len(data), filetype.n_total_rows)
 
     return data
 
@@ -96,16 +103,23 @@ def generate_segments(filename: str, images_dir: str, export_dir: str,
         imsave(filename_segment, segment_img)
 
 
-def create_experiment_csv(filename: str, image_directory: str, output_filename) -> None:
+def create_experiment_csv(filename: str, image_directory: str, output_filename,
+                          original_iam_file=True, map_strikeouts=False) -> None:
     """
     Generates the csv file needed to train tf_crnn with format : path_to_img_segment;transcription_non_formatted
     :param filename: filename of line / words in IAM/ascii
     :param image_directory: directory where the image segments are located
     :param output_filename: filename of the output .csv file
+    :param original_iam_file : if True considers it is the original file provided by IAM db maintainers,
+    if False supposes a generated file
+    :param map_strikeouts: If True will map '#' to '[-]'
     :return:
     """
     # Load filename containing the desired segments info (lines/words)
-    data_segments = load_ascii_txt_file(filename)
+    if original_iam_file:
+        data_segments = load_ascii_txt_file(filename)
+    else:
+        data_segments = load_ascii_txt_file(filename, skiprows=False, asserting_n_rows=False)
 
     list_filenames = []
     list_transcriptions = []
@@ -123,6 +137,8 @@ def create_experiment_csv(filename: str, image_directory: str, output_filename) 
             transcription = re.sub(r'([?(])+\s', r'\1', transcription)
             # Remove space before .,?!) chars
             transcription = re.sub(r'\s+([?.,;!)])', r'\1', transcription).strip()
+            if map_strikeouts:
+                transcription = _map_strikeouts_to_char(transcription)
         except AttributeError:
             print('Transcription does not exists in {}'.format(index))
             continue
@@ -209,3 +225,15 @@ def generate_splits_txt(filename: str, rootdir_set_files: str, exportdir_set_fil
                      (val2_list, os.path.join(exportdir_set_files, 'lines_validation2.txt'))]
     for set_list, export_filename in tuples_export:
         pd.DataFrame(set_list).to_csv(export_filename, sep=' ', header=False, index=False, quoting=3)
+
+
+def _map_strikeouts_to_char(string: str, input_char: str=Info_IAM.strikeout_char, output_char: str='[-]') -> str:
+    """
+    Replaces the input character for strikeout by a new character/set of chars
+    :param string: string to process
+    :param input_char: char representing strike-outs in original string
+    :param output_char: new char or string representing strike-outs in output string
+    :return:
+    """
+
+    return re.sub(input_char, output_char, string)

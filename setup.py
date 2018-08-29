@@ -4,7 +4,7 @@ __license__ = "GPL"
 
 from setuptools import setup, find_packages
 
-setup(name='im_tools',
+setup(name='taputapu',
       version='0.0.1',
       license='GPL',
       author='Sofia Ares Oliveira',
@@ -13,7 +13,8 @@ setup(name='im_tools',
           'numpy',
           'pandas',
           'imageio',
-          'tqdm'
+          'tqdm',
+          'pillow'
       ],
       packages=find_packages(where='.'),
       zip_safe=False)
