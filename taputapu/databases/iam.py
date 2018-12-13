@@ -194,19 +194,34 @@ def generate_splits_txt(filename: str, rootdir_set_files: str, exportdir_set_fil
     data = load_ascii_txt_file(filename)
     lookup_id_set = _make_lookup_id_set(rootdir_set_files)
 
+    basename_file = os.path.basename(filename).split('.')[0]
+
     train_list, test_list, val1_list, val2_list = list(), list(), list(), list()
+
+    # Because word id and line id are formatted a bit differently we need to separate these cases.
+    # The id in the lookup table corresponds to the id of line. Words have an additional 'id of word' appended to it
+
+    def _get_id(raw_id):
+        if 'line' in basename_file:
+            return raw_id
+        elif 'word' in basename_file:
+            return raw_id[:-3]
+        else:
+            raise NotImplementedError
+
     for index, row in tqdm(data.iterrows()):
+        key_lookup = _get_id(row.id)
         try:
-            if lookup_id_set[row.id] == 'train':
+            if lookup_id_set[key_lookup] == 'train':
                 train_list.append(row)
-            elif lookup_id_set[row.id] == 'test':
+            elif lookup_id_set[key_lookup] == 'test':
                 test_list.append(row)
-            elif lookup_id_set[row.id] == 'val1':
+            elif lookup_id_set[key_lookup] == 'val1':
                 val1_list.append(row)
-            elif lookup_id_set[row.id] == 'val2':
+            elif lookup_id_set[key_lookup] == 'val2':
                 val2_list.append(row)
         except KeyError:
-            print('{} does not exist'.format(row.id))
+            print('{} does not exist'.format(key_lookup))
 
     # Check that we have the same number of elements being exported
     assert Info_IAM.train_samples == len(train_list), \
@@ -219,10 +234,10 @@ def generate_splits_txt(filename: str, rootdir_set_files: str, exportdir_set_fil
         "Validation2 : {} != {}".format(Info_IAM.validation2_samples, len(val2_list))
 
     # Export dataframes to txt files
-    tuples_export = [(train_list, os.path.join(exportdir_set_files, 'lines_train.txt')),
-                     (test_list, os.path.join(exportdir_set_files, 'lines_test.txt')),
-                     (val1_list, os.path.join(exportdir_set_files, 'lines_validation1.txt')),
-                     (val2_list, os.path.join(exportdir_set_files, 'lines_validation2.txt'))]
+    tuples_export = [(train_list, os.path.join(exportdir_set_files, '{}_train.txt'.format(basename_file))),
+                     (test_list, os.path.join(exportdir_set_files, '{}_test.txt'.format(basename_file))),
+                     (val1_list, os.path.join(exportdir_set_files, '{}_validation1.txt'.format(basename_file))),
+                     (val2_list, os.path.join(exportdir_set_files, '{}_validation2.txt'.format(basename_file)))]
     for set_list, export_filename in tuples_export:
         pd.DataFrame(set_list).to_csv(export_filename, sep=' ', header=False, index=False, quoting=3)
 
