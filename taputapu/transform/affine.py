@@ -4,6 +4,7 @@ __license__ = "GPL"
 
 import numpy as np
 import cv2
+from typing import Tuple
 
 
 def _find_background_color(image: np.ndarray) -> int:
@@ -45,3 +46,21 @@ def apply_slant(image: np.ndarray, alpha: float) -> np.ndarray:
     img_warp = cv2.warpAffine(image, np.array(warpM), output_size, borderValue=border_value)
 
     return img_warp
+
+
+def resize_image_coordinates(input_coordinates: np.ndarray, input_shape: Tuple[int, int],
+                       resized_shape: Tuple[int, int]) -> np.ndarray:
+    """
+    Resizes the cordinates to fit the resized image
+
+    :param input_coordinates: (x,y) coordinates with shape (N,2)
+    :param input_shape: shape of the input image (H,W)
+    :param resized_shape: shape of the resized image (H, W)
+    :return: the resized coordinates (N, 2)
+    """
+
+    rx = input_shape[0] / resized_shape[0]
+    ry = input_shape[1] / resized_shape[1]
+
+    return np.stack((np.round(input_coordinates[:, 0] / ry),
+                      np.round(input_coordinates[:, 1] / rx)), axis=1).astype(np.int32)
