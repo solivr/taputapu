@@ -37,3 +37,18 @@ def crop_image(image: np.ndarray, x_y_w_h: Tuple[int, int, int, int], margin_wh:
     crop = np.ascontiguousarray(image[ymin:ymax, xmin:xmax], np.uint8)
 
     return crop
+
+
+def get_xywh_from_coordinates(coordinates: np.array) -> Tuple[int, int, int, int]:
+    """
+    From cooridnates points get x,y, width height
+    :param coordinates: (N,2) coordinates (x,y)
+    :return: x, y, w, h
+    """
+    
+    x = np.min(coordinates[:, 0])
+    y = np.min(coordinates[:, 1])
+    w = np.max(coordinates[:, 0]) - x
+    h = np.max(coordinates[:, 1]) - y
+
+    return x, y, w, h
