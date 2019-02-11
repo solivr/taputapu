@@ -45,7 +45,7 @@ def get_xywh_from_coordinates(coordinates: np.array) -> Tuple[int, int, int, int
     :param coordinates: (N,2) coordinates (x,y)
     :return: x, y, w, h
     """
-    
+
     x = np.min(coordinates[:, 0])
     y = np.min(coordinates[:, 1])
     w = np.max(coordinates[:, 0]) - x

@@ -6,7 +6,7 @@ from PIL import Image
 from typing import Tuple
 
 
-def get_image_size_without_loading(filename: str) -> Tuple[int, int]:
+def get_image_shape_without_loading(filename: str) -> Tuple[int, int]:
     """
     Gives the shape (h,w) of the image without loading its content into memory
     :param filename: filename of the image
