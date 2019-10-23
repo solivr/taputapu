@@ -248,7 +248,8 @@ def _make_lookup_id_set(root_dir_set_list: str) -> Mapping[str, str]:
 
 def generate_splits_txt(filename: str,
                         rootdir_set_files: str,
-                        exportdir_set_files: str) -> None:
+                        exportdir_set_files: str,
+                        verbose: bool=False) -> None:
     """
     This function generates the train / test / validation1 / validation2 txt file
     with the same pattern as the ascii/{lines, words}.txt file.
@@ -256,6 +257,7 @@ def generate_splits_txt(filename: str,
     :param filename: full data txt file (e.g lines.txt)
     :param rootdir_set_files: path to directory where the set split .txt files are
     :param exportdir_set_files: directory to save the new generated files
+    :param verbose:
     :return:
     """
     assert os.path.isdir(exportdir_set_files), "There is no {} directory".format(exportdir_set_files)
@@ -289,7 +291,10 @@ def generate_splits_txt(filename: str,
             elif lookup_id_set[key_lookup] == 'val2':
                 val2_list.append(row)
         except KeyError:
-            print('{} does not exist'.format(key_lookup))
+            if verbose:
+                print('{} does not exist'.format(key_lookup))
+            else:
+                pass
 
     # Check that we have the same number of elements being exported
     assert Info_IAM.train_samples == len(train_list), \
@@ -374,7 +379,8 @@ def replace_folder_alias_by_path(csv_filename: str,
               quoting=quoting_level)
 
 
-def get_alphabet_from_input_data(csv_filename: str, split_char: str='|'):
+def get_alphabet_from_input_data(csv_filename: str,
+                                 split_char: str='|'):
     """
     Get alphabet units from the input_data csv file (which contains in each row the tuple
     (filename image segment, transcription formatted))
