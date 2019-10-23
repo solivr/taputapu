@@ -5,7 +5,7 @@ __license__ = "GPL"
 from setuptools import setup, find_packages
 
 setup(name='taputapu',
-      version='0.0.1',
+      version='0.1.0',
       license='GPL',
       author='Sofia Ares Oliveira',
       description='Tools for image processing',

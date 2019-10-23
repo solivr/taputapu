@@ -12,11 +12,21 @@ import os
 from typing import Tuple, Mapping
 from tqdm import tqdm
 import re
+import requests
+import shutil
 from imageio import imread, imsave
 from taputapu.transform.crop import crop_image
 
 
 class Info_IAM:
+    lines_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/data/lines/lines.tgz'
+    sentences_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/data/sentences/sentences.tgz'
+    words_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/data/words/words.tgz'
+    ascii_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/data/ascii/ascii.tgz'
+    split_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/tasks/largeWriterIndependentTextLineRecognitionTask.zip'
+
+    url_to_download = [lines_url, sentences_url, words_url, ascii_url, split_url]
+
     train_samples = 6161
     test_samples = 1861
     validation1_samples = 900
@@ -31,9 +41,9 @@ class Info_IAM:
 
 
 class Linefile_IAM:
-    column_names = ["id", "seg_state", "gray_level", "n_components", "x", "y", "w", "h", "transcription"]
+    column_names = ["id", "seg_state", "gray_level", "n_components", "x", "y", "w", "h", "transcription", "sup_token"]
     column_types = {'id': str, 'seg_state': str, 'gray_level': np.uint8, 'n_components': np.int32,
-                    'x': np.int32, 'y': np.int32, 'w': np.int32, 'h': np.int32, 'transcription': str}
+                    'x': np.int32, 'y': np.int32, 'w': np.int32, 'h': np.int32, 'transcription': str, "sup_token": str}
     skiprows = 23
     n_total_rows = 13353
 
@@ -46,9 +56,47 @@ class Wordfile_IAM:
     n_total_rows = 115320
 
 
+def download(download_dir: str):
+    """
+    Downloads IAM files. Environment variables `ÌAM_USER`` and ``ÌAM_PWD`` must be set.
+
+    :param download_dir: Folder to download archive
+    :return:
+    """
+    url_to_download = Info_IAM.url_to_download
+    os.makedirs(download_dir, exist_ok=True)
+
+    for url in url_to_download:
+        r = requests.get(url, auth=(os.environ.get('IAM_USER'), os.environ.get('IAM_PWD')))
+        assert r.ok, "Could not download the data, verify that your credentials are correct."
+        with open(os.path.join(download_dir, os.path.basename(url)), 'wb') as f:
+            f.write(r.content)
+
+        print(os.path.basename(url), ' downloaded.')
+
+
+def extract(download_dir: str):
+    """
+    Extract files from downloaded archive.
+
+    :param download_dir: folder where archives have been downloaded
+    :return:
+    """
+
+    url_to_download = Info_IAM.url_to_download
+
+    for url in url_to_download:
+        zip_file = os.path.join(download_dir, os.path.basename(url))
+        shutil.unpack_archive(zip_file, os.path.join(os.path.dirname(zip_file),
+                                                     os.path.basename(zip_file).split('.')[0]))
+        print('Extracted ', os.path.basename(url))
+        os.remove(zip_file)
+
+
 def load_ascii_txt_file(filename: str, skiprows=True, asserting_n_rows=True) -> pd.DataFrame:
     """
     Load ascii/*.txt files
+
     :param filename: filename of txt file to load
     :param skiprows: if True will first rows containing text, if False assumes data start from the first row
     :param asserting_n_rows: if True will check that the number of lines read correspond to the exact number of samples
@@ -66,6 +114,11 @@ def load_ascii_txt_file(filename: str, skiprows=True, asserting_n_rows=True) -> 
                        encoding='utf8', error_bad_lines=False, header=None,
                        names=filetype.column_names, dtype=filetype.column_types, quoting=3)
 
+    # Merge transcription with sup_token in case the segmentation has failed (a supp 'space' has been inserted)
+    data.sup_token.fillna('', inplace=True)
+    data.transcription = data.transcription + data.sup_token
+    data.drop('sup_token', axis=1, inplace=True)
+
     if asserting_n_rows:
         assert len(data) == filetype.n_total_rows, "Parsing of file didn't get all the rows. " \
                                                    "Parsed {} instead of {}".format(len(data), filetype.n_total_rows)
@@ -77,6 +130,7 @@ def generate_segments(filename: str, images_dir: str, export_dir: str,
                       margin_wh: Tuple[int, int]=(0, 0)) -> None:
     """
     Crop the lines/words in `filename` and export them as .png files to `export_dir`
+
     :param filename: filename containing the lines/words, coordinates and transcriptions info
     :param images_dir: directory where the original full sized image are
     :param export_dir: export directory to save the cropped segments
@@ -103,10 +157,14 @@ def generate_segments(filename: str, images_dir: str, export_dir: str,
         imsave(filename_segment, segment_img)
 
 
-def create_experiment_csv(filename: str, image_directory: str, output_filename,
-                          original_iam_file=True, map_strikeouts=False) -> None:
+def create_experiment_csv(filename: str,
+                          image_directory: str,
+                          output_filename,
+                          original_iam_file=True,
+                          map_strikeouts=False) -> None:
     """
     Generates the csv file needed to train tf_crnn with format : path_to_img_segment;transcription_non_formatted
+
     :param filename: filename of line / words in IAM/ascii
     :param image_directory: directory where the image segments are located
     :param output_filename: filename of the output .csv file
@@ -133,10 +191,10 @@ def create_experiment_csv(filename: str, image_directory: str, output_filename,
 
         try:
             transcription = row.transcription.replace('|', ' ')
-            # Remove space after ( char)
-            transcription = re.sub(r'([?(])+\s', r'\1', transcription)
-            # Remove space before .,?!) chars
-            transcription = re.sub(r'\s+([?.,;!)])', r'\1', transcription).strip()
+            # # Remove space after (char)
+            # transcription = re.sub(r'([?(])+\s', r'\1', transcription)
+            # # Remove space before .,?!) chars
+            # transcription = re.sub(r'\s+([?.,;!)])', r'\1', transcription).strip()
             if map_strikeouts:
                 transcription = _map_strikeouts_to_char(transcription)
         except AttributeError:
@@ -156,6 +214,7 @@ def _make_lookup_id_set(root_dir_set_list: str) -> Mapping[str, str]:
     From the files listing the id for each set (train, test, validation1, validation2), generate a dictionary that will
     have as keys the id of lines/words and as values the name of set it belongs to ('train', 'test',
     'validation1', 'validation2')
+
     :param root_dir_set_list: path to the folder containing the split files .txt
     :return: a dictionary with {id: set}
     """
@@ -182,10 +241,13 @@ def _make_lookup_id_set(root_dir_set_list: str) -> Mapping[str, str]:
     return dic_set_belonging
 
 
-def generate_splits_txt(filename: str, rootdir_set_files: str, exportdir_set_files: str) -> None:
+def generate_splits_txt(filename: str,
+                        rootdir_set_files: str,
+                        exportdir_set_files: str) -> None:
     """
     This function generates the train / test / validation1 / validation2 txt file
     with the same pattern as the ascii/{lines, words}.txt file.
+
     :param filename: full data txt file (e.g lines.txt)
     :param rootdir_set_files: path to directory where the set split .txt files are
     :param exportdir_set_files: directory to save the new generated files
@@ -239,12 +301,15 @@ def generate_splits_txt(filename: str, rootdir_set_files: str, exportdir_set_fil
                      (val1_list, os.path.join(exportdir_set_files, '{}_validation1.txt'.format(basename_file))),
                      (val2_list, os.path.join(exportdir_set_files, '{}_validation2.txt'.format(basename_file)))]
     for set_list, export_filename in tuples_export:
-        pd.DataFrame(set_list).to_csv(export_filename, sep=' ', header=False, index=False, quoting=3)
+        pd.DataFrame(set_list).to_csv(export_filename, sep=' ', header=False, index=False, quoting=3, escapechar="\\")
 
 
-def _map_strikeouts_to_char(string: str, input_char: str=Info_IAM.strikeout_char, output_char: str='[-]') -> str:
+def _map_strikeouts_to_char(string: str,
+                            input_char: str=Info_IAM.strikeout_char,
+                            output_char: str='[-]') -> str:
     """
     Replaces the input character for strikeout by a new character/set of chars
+
     :param string: string to process
     :param input_char: char representing strike-outs in original string
     :param output_char: new char or string representing strike-outs in output string
@@ -252,3 +317,69 @@ def _map_strikeouts_to_char(string: str, input_char: str=Info_IAM.strikeout_char
     """
 
     return re.sub(input_char, output_char, string)
+
+
+def format_folder_name(csv_filename: str,
+                       path_to_format: str,
+                       pattern_folder: str='$ROOT_FOLDER/',
+                       quoting_level: int=3,
+                       inplace: bool=False):
+    """
+
+    :param csv_filename:
+    :param path_to_format:
+    :param pattern_folder:
+    :param quoting_level:
+    :param inplace:
+    :return:
+    """
+
+    df = pd.read_csv(csv_filename, sep=';', header=None, names=['image', 'labels'], encoding='utf8',
+                     escapechar="\\", quoting=quoting_level)
+    df.image = df.image.apply(lambda x: re.sub(path_to_format, pattern_folder, x))
+
+    if inplace:
+        df.to_csv(csv_filename, sep=';', encoding='utf-8', header=False, index=False, escapechar="\\", quoting=3)
+    else:
+        return df
+
+
+def replace_folder_alias_by_path(csv_filename: str,
+                                 path_to_folder: str,
+                                 pattern_folder: str='\$ROOT_FOLDER/',
+                                 quoting_level: int=0):
+    """
+    Replace the folder alias ``pattern_folder`` to the real path to the folder
+
+    :param csv_filename:
+    :param path_to_folder:
+    :param pattern_folder:
+    :param quoting_level:
+    :return:
+    """
+
+    df = pd.read_csv(csv_filename, sep=';', header=None, names=['image', 'labels'], encoding='utf8',
+                     escapechar="\\", quoting=quoting_level)
+    df.image = df.image.apply(lambda x: re.sub(pattern_folder, path_to_folder, x))
+
+    assert os.path.isfile(df.image[0])
+
+    df.to_csv(csv_filename, sep=';', header=False, index=False, encoding='utf8', escapechar="\\",
+              quoting=quoting_level)
+
+
+def get_alphabet_from_input_data(csv_filename: str, split_char: str='|'):
+    """
+    Get alphabet units from the input_data csv file (which contains in each row the tuple
+    (filename image segment, transcription formatted))
+
+    :param csv_filename: csv file containing the input data
+    :param split_char: splitting character in input_data separting the alphabet units
+    :return:
+    """
+    df = pd.read_csv(csv_filename, sep=';', header=None, names=['image', 'labels'], encoding='utf8',
+                     escapechar="\\")
+    splits = df.labels.apply(lambda x: x[1:-1].split(split_char))
+    unique_units = np.unique([chars for list_chars in splits for chars in list_chars])
+
+    return unique_units
