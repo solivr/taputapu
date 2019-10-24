@@ -25,7 +25,11 @@ class Info_IAM:
     ascii_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/data/ascii/ascii.tgz'
     split_url = 'http://www.fki.inf.unibe.ch/DBs/iamDB/tasks/largeWriterIndependentTextLineRecognitionTask.zip'
 
-    url_to_download = [lines_url, sentences_url, words_url, ascii_url, split_url]
+    url_to_download = [lines_url,
+                       # sentences_url,
+                       # words_url,
+                       ascii_url,
+                       split_url]
 
     train_samples = 6161
     test_samples = 1861
@@ -68,7 +72,7 @@ def download(download_dir: str):
 
     for url in url_to_download:
         r = requests.get(url, auth=(os.environ.get('IAM_USER'), os.environ.get('IAM_PWD')))
-        assert r.ok, "Could not download the data, verify that your credentials are correct."
+        assert r.ok, "Could not download data, verify that your credentials are correct. (IAM_USER and IAM_PWD)"
         with open(os.path.join(download_dir, os.path.basename(url)), 'wb') as f:
             f.write(r.content)
 
@@ -181,8 +185,9 @@ def create_experiment_csv(filename: str,
 
     list_filenames = []
     list_transcriptions = []
+    filename_fn = lambda x: os.path.join(image_directory, x.split('-')[0], '-'.join(x.split('-')[:2]), x + '.png')
     for index, row in tqdm(data_segments.iterrows(), total=len(data_segments)):
-        filename = os.path.join(image_directory, row.id + '.png')
+        filename = filename_fn(row.id)
 
         # Verify image exists
         if not os.path.isfile(filename):
@@ -201,7 +206,7 @@ def create_experiment_csv(filename: str,
             print('Transcription does not exists in {}'.format(index))
             continue
 
-        list_filenames.append(filename)
+        list_filenames.append(os.path.abspath(filename))
         list_transcriptions.append(transcription)
 
     # Create dataframe with filenames and transcriptions
@@ -253,6 +258,7 @@ def generate_splits_txt(filename: str,
     :param exportdir_set_files: directory to save the new generated files
     :return:
     """
+    assert os.path.isdir(exportdir_set_files), "There is no {} directory".format(exportdir_set_files)
     data = load_ascii_txt_file(filename)
     lookup_id_set = _make_lookup_id_set(rootdir_set_files)
 
